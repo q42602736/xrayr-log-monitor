@@ -264,9 +264,18 @@ configure_settings() {
             FREQ_DESC="每15分钟"
             ;;
         4)
-            echo -n "请输入cron时间格式 (例如: */30 * * * * 表示每30分钟): "
-            read CRON_TIME
-            FREQ_DESC="自定义时间"
+            echo -n "请输入检查间隔分钟数 (例如: 10 表示每10分钟检查一次): "
+            read custom_minutes
+
+            # 验证输入是否为有效数字
+            if [[ "$custom_minutes" =~ ^[1-9][0-9]*$ ]] && [ "$custom_minutes" -le 59 ]; then
+                CRON_TIME="*/$custom_minutes * * * *"
+                FREQ_DESC="每${custom_minutes}分钟"
+            else
+                print_warning "输入无效，使用默认设置: 每小时检查一次"
+                CRON_TIME="0 * * * *"
+                FREQ_DESC="每小时"
+            fi
             ;;
         *)
             CRON_TIME="0 * * * *"
