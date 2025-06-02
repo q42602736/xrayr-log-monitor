@@ -18,7 +18,7 @@
 
 ### 下载并运行（推荐）
 ```bash
-wget https://raw.githubusercontent.com/your-username/xrayr-log-monitor/main/xrayr_monitor.sh
+wget https://raw.githubusercontent.com/q42602736/xrayr-log-monitor/main/xrayr_monitor.sh
 chmod +x xrayr_monitor.sh
 sudo ./xrayr_monitor.sh
 ```
