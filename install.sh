@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# XrayR日志监控一键安装脚本
+# XrayR日志监控一键安装脚本 (修复版)
 # GitHub: https://github.com/your-username/xrayr-log-monitor
-# 使用方法: curl -fsSL https://raw.githubusercontent.com/your-username/xrayr-log-monitor/main/install.sh | bash
+# 使用方法: 
+# wget https://raw.githubusercontent.com/your-username/xrayr-log-monitor/main/install_fixed.sh && chmod +x install_fixed.sh && sudo ./install_fixed.sh
 
 set -e
 
@@ -40,7 +41,7 @@ check_requirements() {
     # 检查是否为root用户
     if [ "$EUID" -ne 0 ]; then
         print_error "请以root用户身份运行此脚本"
-        echo "使用方法: sudo bash install.sh"
+        echo "使用方法: sudo ./install_fixed.sh"
         exit 1
     fi
     
@@ -144,9 +145,9 @@ EOF
 # 创建expect重启脚本（可选）
 create_expect_script() {
     print_message "创建expect重启脚本..."
-
+    
     SCRIPT_DIR="/root/xrayr_monitor"
-
+    
     cat > "$SCRIPT_DIR/xrayr_restart.exp" << 'EOF'
 #!/usr/bin/expect
 
@@ -204,7 +205,8 @@ configure_settings() {
     echo "请选择XrayR重启方式:"
     echo "1) 使用systemctl重启 (推荐，更稳定)"
     echo "2) 使用xrayr命令重启 (需要安装expect)"
-    read -p "请输入选择 (1 或 2，默认为1): " restart_method
+    echo -n "请输入选择 (1 或 2，默认为1): "
+    read restart_method
 
     restart_method=${restart_method:-1}
 
@@ -243,7 +245,8 @@ configure_settings() {
     echo "2) 每30分钟检查一次"
     echo "3) 每15分钟检查一次"
     echo "4) 自定义"
-    read -p "请输入选择 (1-4，默认为1): " frequency
+    echo -n "请输入选择 (1-4，默认为1): "
+    read frequency
 
     frequency=${frequency:-1}
 
@@ -261,8 +264,8 @@ configure_settings() {
             FREQ_DESC="每15分钟"
             ;;
         4)
-            echo "请输入cron时间格式 (例如: */30 * * * * 表示每30分钟):"
-            read -p "cron时间: " CRON_TIME
+            echo -n "请输入cron时间格式 (例如: */30 * * * * 表示每30分钟): "
+            read CRON_TIME
             FREQ_DESC="自定义时间"
             ;;
         *)
@@ -304,7 +307,6 @@ show_installation_result() {
     echo "• 查看清理日志: tail -f /var/log/xrayr_cleanup.log"
     echo "• 查看定时任务: crontab -l"
     echo "• 编辑定时任务: crontab -e"
-    echo "• 卸载监控: curl -fsSL https://raw.githubusercontent.com/your-username/xrayr-log-monitor/main/uninstall.sh | bash"
     echo ""
 
     # 测试运行
