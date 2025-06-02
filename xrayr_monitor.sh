@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # XrayR日志监控一体化脚本
-# GitHub: https://github.com/your-username/xrayr-log-monitor
-# 使用方法: wget https://raw.githubusercontent.com/your-username/xrayr-log-monitor/main/xrayr_monitor.sh && chmod +x xrayr_monitor.sh && sudo ./xrayr_monitor.sh
+# GitHub: https://github.com/q42602736/xrayr-log-monitor
+# 使用方法: wget https://raw.githubusercontent.com/q42602736/xrayr-log-monitor/main/xrayr_monitor.sh && chmod +x xrayr_monitor.sh && sudo ./xrayr_monitor.sh
 
 set -e
 
@@ -87,9 +87,10 @@ create_monitor_script() {
 #!/bin/bash
 
 # XrayR日志清理脚本
-# 检查/etc/XrayR/access.Log文件大小，超过${max_size_mb}MB时清理并重启XrayR
+# 检查/etc/XrayR/access.Log和error.log文件大小，超过${max_size_mb}MB时清理并重启XrayR
 
-LOG_FILE="/etc/XrayR/access.Log"
+ACCESS_LOG_FILE="/etc/XrayR/access.Log"
+ERROR_LOG_FILE="/etc/XrayR/error.log"
 MAX_SIZE=${max_size_bytes}  # ${max_size_mb}MB in bytes
 SCRIPT_LOG="/var/log/xrayr_cleanup.log"
 
@@ -98,38 +99,61 @@ log_message() {
     echo "\$(date '+%Y-%m-%d %H:%M:%S') - \$1" >> "\$SCRIPT_LOG"
 }
 
-# 检查日志文件是否存在
-if [ ! -f "\$LOG_FILE" ]; then
-    log_message "警告: XrayR日志文件 \$LOG_FILE 不存在"
-    exit 1
-fi
+# 清理单个日志文件的函数
+cleanup_log_file() {
+    local log_file=\$1
+    local log_type=\$2
 
-# 获取文件大小
-FILE_SIZE=\$(stat -c%s "\$LOG_FILE" 2>/dev/null)
+    # 检查日志文件是否存在
+    if [ ! -f "\$log_file" ]; then
+        log_message "警告: XrayR \$log_type 日志文件 \$log_file 不存在"
+        return 1
+    fi
 
-if [ \$? -ne 0 ]; then
-    log_message "错误: 无法获取文件 \$LOG_FILE 的大小"
-    exit 1
-fi
+    # 获取文件大小
+    local file_size=\$(stat -c%s "\$log_file" 2>/dev/null)
 
-log_message "检查日志文件大小: \$FILE_SIZE bytes (\$((\$FILE_SIZE/1024/1024))MB)"
+    if [ \$? -ne 0 ]; then
+        log_message "错误: 无法获取文件 \$log_file 的大小"
+        return 1
+    fi
 
-# 检查文件大小是否超过设定值
-if [ "\$FILE_SIZE" -gt "\$MAX_SIZE" ]; then
-    log_message "日志文件超过${max_size_mb}MB，开始清理..."
-    
-    # 备份当前日志（可选）
-    BACKUP_FILE="/etc/XrayR/access.Log.backup.\$(date +%Y%m%d_%H%M%S)"
-    cp "\$LOG_FILE" "\$BACKUP_FILE"
-    log_message "已备份日志文件到: \$BACKUP_FILE"
-    
-    # 清空日志文件
-    > "\$LOG_FILE"
-    log_message "已清空日志文件: \$LOG_FILE"
+    log_message "检查 \$log_type 日志文件大小: \$file_size bytes (\$((\$file_size/1024/1024))MB)"
+
+    # 检查文件大小是否超过设定值
+    if [ "\$file_size" -gt "\$MAX_SIZE" ]; then
+        log_message "\$log_type 日志文件超过${max_size_mb}MB，开始清理..."
+
+        # 备份当前日志
+        local backup_file="/etc/XrayR/\${log_type}.log.backup.\$(date +%Y%m%d_%H%M%S)"
+        cp "\$log_file" "\$backup_file"
+        log_message "已备份 \$log_type 日志文件到: \$backup_file"
+
+        # 清空日志文件
+        > "\$log_file"
+        log_message "已清空 \$log_type 日志文件: \$log_file"
+
+        return 0
+    else
+        log_message "\$log_type 日志文件大小正常，无需清理"
+        return 1
+    fi
+}
+
+# 检查并清理access.log
+cleanup_log_file "\$ACCESS_LOG_FILE" "access"
+ACCESS_CLEANED=\$?
+
+# 检查并清理error.log
+cleanup_log_file "\$ERROR_LOG_FILE" "error"
+ERROR_CLEANED=\$?
+
+# 如果任一日志文件被清理，则重启XrayR服务
+if [ \$ACCESS_CLEANED -eq 0 ] || [ \$ERROR_CLEANED -eq 0 ]; then
     
     # 重启XrayR服务
     log_message "开始重启XrayR服务..."
-    
+
     # 使用systemctl重启
     if systemctl is-active --quiet XrayR; then
         systemctl restart XrayR
@@ -148,7 +172,7 @@ if [ "\$FILE_SIZE" -gt "\$MAX_SIZE" ]; then
         fi
     fi
 else
-    log_message "日志文件大小正常，无需清理"
+    log_message "所有日志文件大小正常，无需清理"
 fi
 
 log_message "脚本执行完成"
@@ -220,8 +244,21 @@ install_monitor() {
     check_requirements
 
     # 检查XrayR日志文件
-    if [ ! -f "/etc/XrayR/access.Log" ]; then
-        print_warning "XrayR日志文件 /etc/XrayR/access.Log 不存在"
+    ACCESS_LOG_EXISTS=false
+    ERROR_LOG_EXISTS=false
+
+    if [ -f "/etc/XrayR/access.Log" ]; then
+        ACCESS_LOG_EXISTS=true
+    fi
+
+    if [ -f "/etc/XrayR/error.log" ]; then
+        ERROR_LOG_EXISTS=true
+    fi
+
+    if [ "$ACCESS_LOG_EXISTS" = false ] && [ "$ERROR_LOG_EXISTS" = false ]; then
+        print_warning "XrayR日志文件不存在:"
+        echo "  - /etc/XrayR/access.Log: ❌"
+        echo "  - /etc/XrayR/error.log: ❌"
         echo "脚本仍会继续安装，但请确保XrayR已正确安装"
         echo ""
         echo -n "是否继续安装? (y/N): "
@@ -229,6 +266,18 @@ install_monitor() {
         if [[ ! $continue_install =~ ^[Yy]$ ]]; then
             print_message "安装已取消"
             return
+        fi
+    else
+        print_message "XrayR日志文件检查:"
+        if [ "$ACCESS_LOG_EXISTS" = true ]; then
+            echo "  - /etc/XrayR/access.Log: ✅"
+        else
+            echo "  - /etc/XrayR/access.Log: ❌"
+        fi
+        if [ "$ERROR_LOG_EXISTS" = true ]; then
+            echo "  - /etc/XrayR/error.log: ✅"
+        else
+            echo "  - /etc/XrayR/error.log: ❌"
         fi
     fi
 
@@ -378,7 +427,9 @@ install_monitor() {
     echo -e "${GREEN}安装信息:${NC}"
     echo "• 脚本位置: $SCRIPT_DIR/xrayr_log_cleanup.sh"
     echo "• 日志文件: /var/log/xrayr_cleanup.log"
-    echo "• 监控文件: /etc/XrayR/access.Log"
+    echo "• 监控文件: "
+    echo "  - /etc/XrayR/access.Log"
+    echo "  - /etc/XrayR/error.log"
     echo "• 大小限制: ${MAX_SIZE_MB}MB"
     echo "• 检查频率: $FREQ_DESC"
     echo ""
@@ -453,10 +504,14 @@ uninstall_monitor() {
     echo -n "是否删除XrayR日志备份文件? (y/N): "
     read delete_backup
     if [[ $delete_backup =~ ^[Yy]$ ]]; then
-        BACKUP_COUNT=$(find /etc/XrayR/ -name "access.Log.backup.*" 2>/dev/null | wc -l)
-        if [ "$BACKUP_COUNT" -gt 0 ]; then
-            find /etc/XrayR/ -name "access.Log.backup.*" -delete 2>/dev/null
-            print_message "已删除 $BACKUP_COUNT 个备份文件"
+        ACCESS_BACKUP_COUNT=$(find /etc/XrayR/ -name "access.log.backup.*" 2>/dev/null | wc -l)
+        ERROR_BACKUP_COUNT=$(find /etc/XrayR/ -name "error.log.backup.*" 2>/dev/null | wc -l)
+        TOTAL_BACKUP_COUNT=$((ACCESS_BACKUP_COUNT + ERROR_BACKUP_COUNT))
+
+        if [ "$TOTAL_BACKUP_COUNT" -gt 0 ]; then
+            find /etc/XrayR/ -name "access.log.backup.*" -delete 2>/dev/null
+            find /etc/XrayR/ -name "error.log.backup.*" -delete 2>/dev/null
+            print_message "已删除备份文件: access.log(${ACCESS_BACKUP_COUNT}个) error.log(${ERROR_BACKUP_COUNT}个)"
         else
             print_message "未找到备份文件"
         fi
@@ -520,12 +575,24 @@ show_monitor_status() {
     fi
 
     # 检查XrayR日志文件
+    echo -e "${GREEN}XrayR日志文件:${NC}"
+
+    # 检查access.log
     if [ -f "/etc/XrayR/access.Log" ]; then
-        FILE_SIZE=$(stat -c%s "/etc/XrayR/access.Log" 2>/dev/null)
-        FILE_SIZE_MB=$((FILE_SIZE/1024/1024))
-        echo -e "${GREEN}XrayR日志:${NC} ✅ 存在 (${FILE_SIZE_MB}MB)"
+        ACCESS_SIZE=$(stat -c%s "/etc/XrayR/access.Log" 2>/dev/null)
+        ACCESS_SIZE_MB=$((ACCESS_SIZE/1024/1024))
+        echo "  - access.Log: ✅ 存在 (${ACCESS_SIZE_MB}MB)"
     else
-        echo -e "${YELLOW}XrayR日志:${NC} ⚠️  不存在"
+        echo "  - access.Log: ❌ 不存在"
+    fi
+
+    # 检查error.log
+    if [ -f "/etc/XrayR/error.log" ]; then
+        ERROR_SIZE=$(stat -c%s "/etc/XrayR/error.log" 2>/dev/null)
+        ERROR_SIZE_MB=$((ERROR_SIZE/1024/1024))
+        echo "  - error.log: ✅ 存在 (${ERROR_SIZE_MB}MB)"
+    else
+        echo "  - error.log: ❌ 不存在"
     fi
 
     # 检查XrayR服务状态
@@ -551,11 +618,17 @@ show_monitor_status() {
     fi
 
     # 检查备份文件
-    BACKUP_COUNT=$(find /etc/XrayR/ -name "access.Log.backup.*" 2>/dev/null | wc -l)
-    if [ "$BACKUP_COUNT" -gt 0 ]; then
-        echo -e "${GREEN}备份文件:${NC} ✅ ${BACKUP_COUNT}个"
+    ACCESS_BACKUP_COUNT=$(find /etc/XrayR/ -name "access.log.backup.*" 2>/dev/null | wc -l)
+    ERROR_BACKUP_COUNT=$(find /etc/XrayR/ -name "error.log.backup.*" 2>/dev/null | wc -l)
+    TOTAL_BACKUP_COUNT=$((ACCESS_BACKUP_COUNT + ERROR_BACKUP_COUNT))
+
+    echo -e "${GREEN}备份文件:${NC}"
+    if [ "$TOTAL_BACKUP_COUNT" -gt 0 ]; then
+        echo "  - access.log备份: ${ACCESS_BACKUP_COUNT}个"
+        echo "  - error.log备份: ${ERROR_BACKUP_COUNT}个"
+        echo "  - 总计: ✅ ${TOTAL_BACKUP_COUNT}个"
     else
-        echo -e "${YELLOW}备份文件:${NC} ⚠️  无"
+        echo "  - 总计: ⚠️  无备份文件"
     fi
 
     echo ""
